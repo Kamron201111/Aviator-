@@ -304,4 +304,364 @@
       box-shadow:
         0 12px 25px rgba(56, 189, 248, 0.35),
         0 0 0 1px rgba(8, 47, 73, 0.9);
+    }</style>
+</head>
+<body>
+  <div class="game-container">
+    <div class="header">
+      <div class="title">
+        <div class="title-icon">🚀</div>
+        <div class="title-text">
+          <h1>Aviator Mini</h1>
+          <span>Real-time koeffitsiyent + CASH OUT</span>
+        </div>
+      </div>
+      <div class="badge">HTML · localStorage</div>
+    </div>
+
+    <div class="panel">
+      <div class="rocket-area">
+        <div class="rocket-track">
+          <div class="rocket-line" id="rocketLine"></div>
+          <div class="rocket-icon" id="rocketIcon">🚀</div>
+        </div>
+
+        <div class="rocket-status">
+          <span>
+            Raund: <strong id="roundStatus">Kutish holati</strong>
+          </span>
+          <span class="timer">
+            ⏱ <span id="timerValue">0.0</span> s
+          </span>
+          <span class="coeff" id="coeffLabel">
+            x<span id="coeffValue">1.00</span>
+          </span>
+        </div>
+
+        <div class="rocket-status">
+          <span class="crash-point" id="crashPointLabel">
+            Crash nuqta: ?x (yashirin)
+          </span>
+          <span class="crash-point">Fair RNG · demo</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="balance-row">
+      <div>
+        <div class="balance-label">Balans</div>
+        <div class="balance-value">
+          <span id="balanceValue">-</span>
+          <span class="chip">tanga</span>
+        </div>
+      </div>
+      <div>
+        <span class="balance-label">Minimal dizayn • Low graphic</span>
+      </div>
+    </div>
+
+    <div class="bet-row">
+      <div class="bet-input-wrapper">
+        <label for="betInput">Stavka miqdori</label>
+        <input id="betInput" type="number" min="1" placeholder="Masalan: 100" />
+      </div>
+    </div>
+
+    <div class="bet-row">
+      <div class="quick-bets">
+        <button class="quick-bet-btn" data-bet="50">+50</button>
+        <button class="quick-bet-btn" data-bet="100">+100</button>
+        <button class="quick-bet-btn" data-bet="250">+250</button>
+        <button class="quick-bet-btn" data-bet="500">+500</button>
+      </div>
+    </div>
+
+    <div class="actions-row">
+      <button class="btn btn-secondary" id="maxBtn">MAX</button>
+      <button class="btn btn-primary" id="startBtn">RAKETANI UCHIR & TIKISH</button>
+      <button class="btn btn-danger" id="cashOutBtn" disabled>CASH OUT</button>
+    </div>
+
+    <div class="status-text" id="statusText">
+      <strong>Tayyor.</strong> Stavka kiriting va
+      <strong>RAKETANI UCHIR & TIKISH</strong> tugmasini bosing. Keyin raund
+      davomida <span class="info">CASH OUT</span> bosib chiqib ketishingiz
+      mumkin.
+    </div>
+
+    <div class="footer">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="dot"></div>
+        <span>Offline Aviator demo</span>
+      </div>
+      <button class="link-btn" id="resetBalanceBtn">Balansni tiklash</button>
+    </div>
+  </div>
+
+  <script>
+    // ===========================
+    //      CONFIG
+    // ===========================
+    const INITIAL_BALANCE = 1000;
+    const STORAGE_KEY_BALANCE = "aviator_balance_v1";
+
+    const LINEAR_GROWTH = 1.35;
+    const QUAD_GROWTH = 0.35;
+
+    function generateCrashPoint() {
+      const r = Math.random();
+      const raw = 1 + -Math.log(r) * 1.1;
+      const capped = Math.min(raw, 50);
+      return parseFloat(capped.toFixed(2));
     }
+
+    // ===========================
+    //      STATE
+    // ===========================
+    let balance = INITIAL_BALANCE;
+    let isRoundRunning = false;
+    let hasCashedOut = false;
+    let hasActiveBet = false;
+    let currentBet = 0;
+    let crashPoint = null;
+    let animationFrameId = null;
+    let startTime = null;
+
+    // ===========================
+    //     DOM ELEMENTS
+    // ===========================
+    const balanceEl = document.getElementById("balanceValue");
+    const betInput = document.getElementById("betInput");
+    const statusText = document.getElementById("statusText");
+    const startBtn = document.getElementById("startBtn");
+    const maxBtn = document.getElementById("maxBtn");
+    const cashOutBtn = document.getElementById("cashOutBtn");
+    const quickBetButtons = document.querySelectorAll(".quick-bet-btn");
+    const timerValueEl = document.getElementById("timerValue");
+    const coeffValueEl = document.getElementById("coeffValue");
+    const coeffLabelEl = document.getElementById("coeffLabel");
+    const rocketLine = document.getElementById("rocketLine");
+    const rocketIcon = document.getElementById("rocketIcon");
+    const roundStatusEl = document.getElementById("roundStatus");
+    const crashPointLabelEl = document.getElementById("crashPointLabel");
+    const resetBalanceBtn = document.getElementById("resetBalanceBtn");
+
+    // ===========================
+    //     HELPERS
+    // ===========================
+    function formatBalance(v) {
+      return v.toLocaleString("en-US").replace(/,/g, " ");
+    }
+
+    function saveBalance() {
+      localStorage.setItem(STORAGE_KEY_BALANCE, String(balance));
+    }
+
+    function loadBalance() {
+      const stored = localStorage.getItem(STORAGE_KEY_BALANCE);
+      if (stored !== null && !isNaN(parseInt(stored)))
+        balance = parseInt(stored);
+    }
+
+    function resetRocketVisual() {
+      rocketLine.style.transform = "scaleX(0.05)";
+      rocketIcon.style.transform = "translateX(0)";
+      rocketIcon.style.opacity = "1";
+      coeffValueEl.textContent = "1.00";
+      coeffLabelEl.classList.remove("crashed");
+      timerValueEl.textContent = "0.0";
+      roundStatusEl.textContent = "Kutish holati";
+      crashPointLabelEl.textContent = "Crash nuqta: ?x (yashirin)";
+    }
+
+    function updateBalanceDisplay() {
+      balanceEl.textContent = formatBalance(balance);
+    }
+
+    function setStatus(msg, type) {
+      let cls = "";
+      if (type === "win") cls = "win";
+      else if (type === "lose") cls = "lose";
+      else if (type === "info") cls = "info";
+
+      statusText.innerHTML = `<span class="${cls}">${msg}</span>`;
+    }
+
+    function disableDuringRound() {
+      betInput.disabled = true;
+      quickBetButtons.forEach((b) => (b.disabled = true));
+      maxBtn.disabled = true;
+      startBtn.disabled = true;
+      cashOutBtn.disabled = false;
+    }
+
+    function enableIdle() {
+      betInput.disabled = false;
+      quickBetButtons.forEach((b) => (b.disabled = false));
+      maxBtn.disabled = false;
+      startBtn.disabled = false;
+      cashOutBtn.disabled = true;
+    }
+
+    function validateBet() {
+      const v = parseInt(betInput.value, 10);
+      if (isNaN(v) || v <= 0) {
+        setStatus("❗ Stavkani to‘g‘ri kiriting (musbat son).", "info");
+        return null;
+      }
+      if (v > balance) {
+        setStatus(
+          `❗ Tanga yetmaydi.\nBalans: ${formatBalance(balance)}`,
+          "info"
+        );
+        return null;
+      }
+      return v;
+    }
+
+    function computeMultiplier(t) {
+      if (t <= 0) return 1.0;
+      return 1 + t * LINEAR_GROWTH + t * t * QUAD_GROWTH;
+    }
+
+    // ===========================
+    //     GAME LOOP
+    // ===========================
+    function startRound() {
+      if (isRoundRunning) return;
+
+      const bet = validateBet();
+      if (bet === null) return;
+
+      currentBet = bet;
+      balance -= bet;
+      updateBalanceDisplay();
+      saveBalance();
+
+      hasActiveBet = true;
+      hasCashedOut = false;
+
+      crashPoint = generateCrashPoint();
+
+      resetRocketVisual();
+      roundStatusEl.textContent = "Raketa uchmoqda";
+      setStatus(
+        `🎯 Stavka: ${formatBalance(bet)} tanga.\nRaund boshlandi.`,
+        "info"
+      );
+
+      isRoundRunning = true;
+      startTime = performance.now();
+
+      disableDuringRound();
+
+      function tick() {
+        if (!isRoundRunning) return;
+
+        const now = performance.now();
+        const elapsed = (now - startTime) / 1000;
+
+        timerValueEl.textContent = elapsed.toFixed(2);
+
+        const m = computeMultiplier(elapsed);
+        coeffValueEl.textContent = m.toFixed(2);
+
+        const progress = Math.min(1, m / Math.max(crashPoint || 5, 1));
+        rocketLine.style.transform = `scaleX(${0.05 + progress})`;
+        rocketIcon.style.transform = `translateX(${progress * 90}px)`;
+
+        if (m >= crashPoint && !hasCashedOut) {
+          handleCrash(m);
+          return;
+        }
+
+        animationFrameId = requestAnimationFrame(tick);
+      }
+
+      animationFrameId = requestAnimationFrame(tick);
+    }
+
+    function handleCrash(m) {
+      isRoundRunning = false;
+      hasActiveBet = false;
+
+      cancelAnimationFrame(animationFrameId);
+
+      coeffLabelEl.classList.add("crashed");
+      rocketIcon.style.opacity = "0.4";
+      roundStatusEl.textContent = "Raketa portladi";
+
+      crashPointLabelEl.textContent = `Crash: x${crashPoint}`;
+
+      setStatus(
+        `🔴 Raketa portladi.\nYo‘qotish: ${formatBalance(currentBet)} tanga.`,
+        "lose"
+      );
+
+      enableIdle();
+    }
+
+    function cashOut() {
+      if (!isRoundRunning || hasCashedOut || !hasActiveBet) return;
+
+      const m = parseFloat(coeffValueEl.textContent);
+      if (isNaN(m) || m < 1) return;
+
+      hasCashedOut = true;
+      isRoundRunning = false;
+      hasActiveBet = false;
+
+      cancelAnimationFrame(animationFrameId);
+
+      const win = Math.floor(currentBet * m);
+      balance += win;
+      updateBalanceDisplay();
+      saveBalance();
+
+      roundStatusEl.textContent = "Cash Out!";
+      crashPointLabelEl.textContent = `CashOut x${m.toFixed(2)}`;
+
+      setStatus(
+        `🟢 YUTIQ!\n${formatBalance(win)} tanga.\nKoeff: x${m.toFixed(2)}`,
+        "win"
+      );
+
+      enableIdle();
+    }
+
+    function resetBalance() {
+      if (isRoundRunning) return;
+      balance = INITIAL_BALANCE;
+      saveBalance();
+      updateBalanceDisplay();
+      setStatus(`🔄 Balans tiklandi: ${formatBalance(balance)} tanga.`, "info");
+    }
+
+    // ===========================
+    //     EVENTS
+    // ===========================
+    startBtn.addEventListener("click", startRound);
+    cashOutBtn.addEventListener("click", cashOut);
+    resetBalanceBtn.addEventListener("click", resetBalance);
+
+    maxBtn.addEventListener("click", () => {
+      if (isRoundRunning) return;
+      betInput.value = balance;
+    });
+
+    quickBetButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (isRoundRunning) return;
+        betInput.value =
+          (parseInt(betInput.value || "0") || 0) +
+          parseInt(btn.dataset.bet);
+      });
+    });
+
+    // Init
+    loadBalance();
+    updateBalanceDisplay();
+    resetRocketVisual();
+  </script>
+</body>
+</html>
